@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>💖 Galaxia Corazón Cambiante</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            overflow: hidden;
+            background: #000000;
+            height: 100vh;
+            width: 100vw;
+            touch-action: none;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Instrucciones para móvil */
+        .mobile-instructions {
+            position: fixed;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 100;
+            pointer-events: none;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(5px);
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-instructions {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div class="mobile-instructions">
+        👆 Toca y arrastra para rotar • 🤏 Pellizca para zoom
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Variables principales
+        let scene, camera, renderer;
+        
+        // Configuración CORREGIDA
+        const GALAXY = {
+            layers: {
+                // CORAZÓN CENTRAL que cambia de color
+                heartStars: 12000,
+                heartRadius: 120,
+                
+                // Brazos espirales
+                armsPerGalaxy: 4,
+                starsPerArm: 6000,
+                armRadius: 2800,
+                armHeight: 250,
+                
+                // Halo estelar
+                haloStars: 18000,
+                haloRadius: 7000,
+                
+                // Fondo cósmico - CORRECCIÓN: era 220000, ahora 22000
+                backgroundStars: 220000,
+                backgroundRadius: 12000,
+                
+                totalStars: 100000
+            }
+        };
+
+        // Variables de control
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let cameraRotation = { x: 0, y: 0 };
+        let cameraDistance = 2500;
+        
+        // Variables para cambio de colores (SOLO ESTRELLAS)
+        let heartColors = {
+            current: { r: 1.0, g: 0.4, b: 0.6 },
+            target: { r: 1.0, g: 0.4, b: 0.6 }
+        };
+        let galaxyColors = {
+            current: { r: 0.6, g: 0.7, b: 0.9 },
+            target: { r: 0.6, g: 0.7, b: 0.9 }
+        };
+        
+        // Paleta de colores para el corazón (SOLO ESTRELLAS)
+        const HEART_COLORS = [
+            { r: 1.0, g: 0.4, b: 0.6 },  // Rosa vibrante
+            { r: 1.0, g: 0.2, b: 0.8 },  // Rosa fucsia
+            { r: 1.0, g: 0.8, b: 0.4 },  // Dorado
+            { r: 0.4, g: 1.0, b: 0.6 },  // Verde menta
+            { r: 0.4, g: 0.6, b: 1.0 },  // Azul cielo
+            { r: 0.8, g: 0.4, b: 1.0 },  // Púrpura
+            { r: 1.0, g: 0.6, b: 0.4 },  // Naranja
+            { r: 0.6, g: 1.0, b: 0.8 }   // Verde agua
+        ];
+        
+        // Paleta de colores para la galaxia (SOLO ESTRELLAS)
+        const GALAXY_COLORS = [
+            { r: 0.6, g: 0.7, b: 0.9 },  // Azul suave
+            { r: 0.8, g: 0.6, b: 0.9 },  // Púrpura pastel
+            { r: 0.9, g: 0.8, b: 0.6 },  // Dorado suave
+            { r: 0.6, g: 0.9, b: 0.7 },  // Verde pastel
+            { r: 0.7, g: 0.8, b: 1.0 },  // Azul cielo claro
+            { r: 0.9, g: 0.7, b: 0.8 },  // Rosa suave
+            { r: 1.0, g: 0.9, b: 0.7 },  // Amarillo pastel
+            { r: 0.7, g: 0.9, b: 1.0 }   // Azul celeste
+        ];
+        
+        // Referencias a los objetos de la galaxia
+        let galaxyObjects = {};
+        
+        // Detectar si es móvil
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        // Función para interpolación suave de colores
+        function lerpColor(start, end, t) {
+            return {
+                r: start.r + (end.r - start.r) * t,
+                g: start.g + (end.g - start.g) * t,
+                b: start.b + (end.b - start.b) * t
+            };
+        }
+        
+        // Función para generar color basado en posición y tiempo
+        function getDynamicColor(baseColor, time, position, type) {
+            const t = time * 0.5;
+            const x = position.x || 0;
+            const y = position.y || 0;
+            const z = position.z || 0;
+            
+            let variation = 0;
+            
+            switch(type) {
+                case 'heart':
+                    // Variación fuerte para el corazón
+                    variation = Math.sin(t * 2 + x * 0.01 + y * 0.01) * 0.2;
+                    break;
+                case 'arm':
+                    // Variación suave en brazos
+                    variation = Math.sin(t + x * 0.005 + z * 0.005) * 0.15;
+                    break;
+                case 'halo':
+                    // Variación muy suave en halo
+                    variation = Math.sin(t * 0.5 + x * 0.002) * 0.1;
+                    break;
+                default:
+                    variation = Math.sin(t + x * 0.003) * 0.1;
+            }
+            
+            return {
+                r: Math.max(0, Math.min(1, baseColor.r + variation)),
+                g: Math.max(0, Math.min(1, baseColor.g + variation * 0.8)),
+                b: Math.max(0, Math.min(1, baseColor.b + variation * 0.6))
+            };
+        }
+        
+        // Función para crear forma de corazón
+        function getHeartPosition(radius, t) {
+            const x = 16 * Math.pow(Math.sin(t), 3);
+            const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+            return { x: x * radius * 0.02, y: y * radius * 0.02 };
+        }
+        
+        // Inicializar
+        function init() {
+            console.log("🌈 Creando galaxia con corazón que cambia de colores...");
+            console.log("📱 Dispositivo:", isMobile ? "Móvil" : "PC");
+            
+            // Escena con fondo NEGRO ABSOLUTO
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); // NEGRO
+            scene.fog = new THREE.FogExp2(0x000000, 0.000002); // Niebla negra muy sutil
+            
+            // Cámara
+            camera = new THREE.PerspectiveCamera(
+                75,
+                window.innerWidth / window.innerHeight,
+                1,
+                100000
+            );
+            camera.position.z = cameraDistance;
+            
+            // Renderer optimizado para ambos dispositivos
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: !isMobile, // Mejor rendimiento en móvil
+                alpha: true,
+                powerPreference: "high-performance"
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            // Crear galaxia con corazón cambiante
+            createColorChangingGalaxy();
+            
+            // Eventos mejorados para móvil
+            setupEvents();
+            
+            // Iniciar ciclo de colores (SOLO ESTRELLAS)
+            startColorCycle();
+            
+            // Animación
+            animate();
+            
+            // Ocultar instrucciones después de 8 segundos en móvil
+            if (isMobile) {
+                setTimeout(() => {
+                    document.querySelector('.mobile-instructions').style.opacity = '0';
+                    setTimeout(() => {
+                        document.querySelector('.mobile-instructions').style.display = 'none';
+                    }, 1000);
+                }, 8000);
+            }
+        }
+        
+        // Crear galaxia con colores dinámicos
+        function createColorChangingGalaxy() {
+            // 1. Corazón central que cambia de color
+            createDynamicHeart();
+            
+            // 2. Brazos espirales con colores dinámicos
+            createDynamicSpiralArms();
+            
+            // 3. Halo con colores cambiantes
+            createDynamicHalo();
+            
+            // 4. Fondo cósmico dinámico
+            createDynamicBackground();
+        }
+        
+        function createDynamicHeart() {
+            const group = new THREE.Group();
+            
+            // CORAZÓN con colores dinámicos
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(GALAXY.layers.heartStars * 3);
+            const colors = new Float32Array(GALAXY.layers.heartStars * 3);
+            const sizes = new Float32Array(GALAXY.layers.heartStars);
+            
+            for (let i = 0; i < GALAXY.layers.heartStars; i++) {
+                const i3 = i * 3;
+                
+                const t = Math.random() * Math.PI * 2;
+                const heartPos = getHeartPosition(GALAXY.layers.heartRadius, t);
+                const depth = (Math.random() - 0.5) * 40;
+                
+                positions[i3] = heartPos.x;
+                positions[i3 + 1] = heartPos.y;
+                positions[i3 + 2] = depth;
+                
+                // Color inicial (será actualizado dinámicamente)
+                colors[i3] = heartColors.current.r;
+                colors[i3 + 1] = heartColors.current.g;
+                colors[i3 + 2] = heartColors.current.b;
+                
+                sizes[i] = Math.random() * 2.5 + 1.5;
+            }
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            
+            const material = new THREE.PointsMaterial({
+                size: isMobile ? 1.8 : 2.2,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.85,
+                blending: THREE.AdditiveBlending
+            });
+            
+            const heartStars = new THREE.Points(geometry, material);
+            group.add(heartStars);
+            
+            // AURA dinámica (más transparente en fondo negro)
+            const auraGeometry = new THREE.SphereGeometry(GALAXY.layers.heartRadius * 1.8, 32, 32);
+            const auraMaterial = new THREE.MeshBasicMaterial({
+                color: new THREE.Color(heartColors.current.r, heartColors.current.g, heartColors.current.b),
+                transparent: true,
+                opacity: 0.08, // Más sutil en fondo negro
+                side: THREE.BackSide
+            });
+            const aura = new THREE.Mesh(auraGeometry, auraMaterial);
+            group.add(aura);
+            
+            // Partículas orbitantes
+            const sparkGeometry = new THREE.BufferGeometry();
+            const sparkCount = 2000;
+            const sparkPositions = new Float32Array(sparkCount * 3);
+            const sparkColors = new Float32Array(sparkCount * 3);
+            const sparkSizes = new Float32Array(sparkCount);
+            
+            for (let i = 0; i < sparkCount; i++) {
+                const i3 = i * 3;
+                const radius = 50 + Math.random() * 100;
+                const angle = Math.random() * Math.PI * 2;
+                const height = (Math.random() - 0.5) * 60;
+                
+                sparkPositions[i3] = Math.cos(angle) * radius;
+                sparkPositions[i3 + 1] = height;
+                sparkPositions[i3 + 2] = Math.sin(angle) * radius;
+                
+                sparkColors[i3] = heartColors.current.r;
+                sparkColors[i3 + 1] = heartColors.current.g * 1.2;
+                sparkColors[i3 + 2] = heartColors.current.b * 1.2;
+                
+                sparkSizes[i] = Math.random() * 1.5 + 0.5;
+            }
+            
+            sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
+            sparkGeometry.setAttribute('color', new THREE.BufferAttribute(sparkColors, 3));
+            sparkGeometry.setAttribute('size', new THREE.BufferAttribute(sparkSizes, 1));
+            
+            const sparkMaterial = new THREE.PointsMaterial({
+                size: isMobile ? 1.0 : 1.2,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.7,
+                blending: THREE.AdditiveBlending
+            });
+            
+            const sparks = new THREE.Points(sparkGeometry, sparkMaterial);
+            group.add(sparks);
+            
+            scene.add(group);
+            
+            galaxyObjects.heart = {
+                group: group,
+                heartStars: heartStars,
+                aura: aura,
+                sparks: sparks,
+                geometry: geometry,
+                sparkGeometry: sparkGeometry,
+                material: material,
+                sparkMaterial: sparkMaterial,
+                auraMaterial: auraMaterial
+            };
+        }
+        
+        function createDynamicSpiralArms() {
+            const group = new THREE.Group();
+            
+            for (let arm = 0; arm < GALAXY.layers.armsPerGalaxy; arm++) {
+                const geometry = new THREE.BufferGeometry();
+                const starCount = GALAXY.layers.starsPerArm;
+                const positions = new Float32Array(starCount * 3);
+                const colors = new Float32Array(starCount * 3);
+                const sizes = new Float32Array(starCount);
+                
+                const armAngle = (arm / GALAXY.layers.armsPerGalaxy) * Math.PI * 2;
+                
+                for (let i = 0; i < starCount; i++) {
+                    const i3 = i * 3;
+                    
+                    const progress = Math.pow(Math.random(), 1.8);
+                    const radius = 150 + progress * GALAXY.layers.armRadius;
+                    const spiralAngle = armAngle + progress * Math.PI * 10;
+                    const height = (Math.random() - 0.5) * GALAXY.layers.armHeight;
+                    
+                    positions[i3] = Math.cos(spiralAngle) * radius;
+                    positions[i3 + 1] = height;
+                    positions[i3 + 2] = Math.sin(spiralAngle) * radius;
+                    
+                    // Color inicial de galaxia
+                    colors[i3] = galaxyColors.current.r;
+                    colors[i3 + 1] = galaxyColors.current.g;
+                    colors[i3 + 2] = galaxyColors.current.b;
+                    
+                    sizes[i] = Math.random() * 2 + 0.8;
+                }
+                
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+                
+                const material = new THREE.PointsMaterial({
+                    size: isMobile ? 1.2 : 1.5,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.6,
+                    blending: THREE.AdditiveBlending
+                });
+                
+                const armStars = new THREE.Points(geometry, material);
+                group.add(armStars);
+                
+                if (!galaxyObjects.arms) galaxyObjects.arms = [];
+                galaxyObjects.arms.push({
+                    geometry: geometry,
+                    material: material,
+                    stars: armStars
+                });
+            }
+            
+            scene.add(group);
+            galaxyObjects.spiralGroup = group;
+        }
+        
+        function createDynamicHalo() {
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(GALAXY.layers.haloStars * 3);
+            const colors = new Float32Array(GALAXY.layers.haloStars * 3);
+            const sizes = new Float32Array(GALAXY.layers.haloStars);
+            
+            for (let i = 0; i < GALAXY.layers.haloStars; i++) {
+                const i3 = i * 3;
+                
+                const radius = 500 + Math.random() * GALAXY.layers.haloRadius;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                
+                positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
+                positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                positions[i3 + 2] = radius * Math.cos(phi);
+                
+                // Color inicial
+                colors[i3] = galaxyColors.current.r * 0.7;
+                colors[i3 + 1] = galaxyColors.current.g * 0.7;
+                colors[i3 + 2] = galaxyColors.current.b * 0.7;
+                
+                sizes[i] = Math.random() * 1.8 + 0.6;
+            }
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            
+            const material = new THREE.PointsMaterial({
+                size: isMobile ? 1.0 : 1.4,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.4,
+                sizeAttenuation: true
+            });
+            
+            const halo = new THREE.Points(geometry, material);
+            scene.add(halo);
+            
+            galaxyObjects.halo = {
+                geometry: geometry,
+                material: material,
+                stars: halo
+            };
+        }
+        
+        function createDynamicBackground() {
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(GALAXY.layers.backgroundStars * 3);
+            const colors = new Float32Array(GALAXY.layers.backgroundStars * 3);
+            const sizes = new Float32Array(GALAXY.layers.backgroundStars);
+            
+            for (let i = 0; i < GALAXY.layers.backgroundStars; i++) {
+                const i3 = i * 3;
+                
+                const radius = 3000 + Math.random() * GALAXY.layers.backgroundRadius;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                
+                positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
+                positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                positions[i3 + 2] = radius * Math.cos(phi);
+                
+                // Color inicial
+                colors[i3] = galaxyColors.current.r * 0.9;
+                colors[i3 + 1] = galaxyColors.current.g * 0.9;
+                colors[i3 + 2] = galaxyColors.current.b * 0.9;
+                
+                sizes[i] = Math.random() * 2.2 + 0.8;
+            }
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            
+            const material = new THREE.PointsMaterial({
+                size: isMobile ? 1.4 : 1.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.5,
+                sizeAttenuation: true
+            });
+            
+            const background = new THREE.Points(geometry, material);
+            scene.add(background);
+            
+            galaxyObjects.background = {
+                geometry: geometry,
+                material: material,
+                stars: background
+            };
+        }
+        
+        // Actualizar colores de todos los objetos (SOLO ESTRELLAS)
+        function updateColors(time) {
+            // Interpolar colores actuales hacia los objetivos
+            heartColors.current = lerpColor(heartColors.current, heartColors.target, 0.02);
+            galaxyColors.current = lerpColor(galaxyColors.current, galaxyColors.target, 0.01);
+            
+            // Actualizar corazón
+            if (galaxyObjects.heart) {
+                const heartColorsArray = galaxyObjects.heart.geometry.attributes.color.array;
+                const sparkColorsArray = galaxyObjects.heart.sparkGeometry.attributes.color.array;
+                const positions = galaxyObjects.heart.geometry.attributes.position.array;
+                
+                for (let i = 0; i < heartColorsArray.length; i += 3) {
+                    const idx = i / 3;
+                    const pos = {
+                        x: positions[i],
+                        y: positions[i + 1],
+                        z: positions[i + 2]
+                    };
+                    
+                    const dynamicColor = getDynamicColor(heartColors.current, time, pos, 'heart');
+                    
+                    heartColorsArray[i] = dynamicColor.r;
+                    heartColorsArray[i + 1] = dynamicColor.g;
+                    heartColorsArray[i + 2] = dynamicColor.b;
+                }
+                
+                galaxyObjects.heart.geometry.attributes.color.needsUpdate = true;
+                
+                // Actualizar chispas
+                for (let i = 0; i < sparkColorsArray.length; i += 3) {
+                    sparkColorsArray[i] = heartColors.current.r;
+                    sparkColorsArray[i + 1] = heartColors.current.g * 1.1;
+                    sparkColorsArray[i + 2] = heartColors.current.b * 1.1;
+                }
+                galaxyObjects.heart.sparkGeometry.attributes.color.needsUpdate = true;
+                
+                // Actualizar aura
+                galaxyObjects.heart.auraMaterial.color.setRGB(
+                    heartColors.current.r,
+                    heartColors.current.g,
+                    heartColors.current.b
+                );
+            }
+            
+            // Actualizar brazos espirales
+            if (galaxyObjects.arms) {
+                galaxyObjects.arms.forEach((arm, armIndex) => {
+                    const colorsArray = arm.geometry.attributes.color.array;
+                    const positions = arm.geometry.attributes.position.array;
+                    
+                    for (let i = 0; i < colorsArray.length; i += 3) {
+                        const idx = i / 3;
+                        const pos = {
+                            x: positions[i],
+                            y: positions[i + 1],
+                            z: positions[i + 2]
+                        };
+                        
+                        const dynamicColor = getDynamicColor(galaxyColors.current, time, pos, 'arm');
+                        
+                        colorsArray[i] = dynamicColor.r;
+                        colorsArray[i + 1] = dynamicColor.g;
+                        colorsArray[i + 2] = dynamicColor.b;
+                    }
+                    
+                    arm.geometry.attributes.color.needsUpdate = true;
+                });
+            }
+            
+            // Actualizar halo
+            if (galaxyObjects.halo) {
+                const colorsArray = galaxyObjects.halo.geometry.attributes.color.array;
+                const positions = galaxyObjects.halo.geometry.attributes.position.array;
+                
+                for (let i = 0; i < colorsArray.length; i += 3) {
+                    const idx = i / 3;
+                    const pos = {
+                        x: positions[i],
+                        y: positions[i + 1],
+                        z: positions[i + 2]
+                    };
+                    
+                    const dynamicColor = getDynamicColor(
+                        {
+                            r: galaxyColors.current.r * 0.7,
+                            g: galaxyColors.current.g * 0.7,
+                            b: galaxyColors.current.b * 0.7
+                        },
+                        time,
+                        pos,
+                        'halo'
+                    );
+                    
+                    colorsArray[i] = dynamicColor.r;
+                    colorsArray[i + 1] = dynamicColor.g;
+                    colorsArray[i + 2] = dynamicColor.b;
+                }
+                
+                galaxyObjects.halo.geometry.attributes.color.needsUpdate = true;
+            }
+            
+            // Actualizar fondo
+            if (galaxyObjects.background) {
+                const colorsArray = galaxyObjects.background.geometry.attributes.color.array;
+                
+                for (let i = 0; i < colorsArray.length; i += 3) {
+                    colorsArray[i] = galaxyColors.current.r * 0.9;
+                    colorsArray[i + 1] = galaxyColors.current.g * 0.9;
+                    colorsArray[i + 2] = galaxyColors.current.b * 0.9;
+                }
+                
+                galaxyObjects.background.geometry.attributes.color.needsUpdate = true;
+            }
+        }
+        
+        // Ciclo de cambio de colores (SOLO ESTRELLAS)
+        function startColorCycle() {
+            let colorIndex = 0;
+            
+            setInterval(() => {
+                colorIndex = (colorIndex + 1) % HEART_COLORS.length;
+                
+                // Nuevo color para el corazón
+                heartColors.target = HEART_COLORS[colorIndex];
+                
+                // Nuevo color complementario para la galaxia
+                galaxyColors.target = GALAXY_COLORS[colorIndex];
+                
+            }, 5000); // Cambia cada 5 segundos
+        }
+        
+        // Eventos MEJORADOS para móvil
+        function setupEvents() {
+            const canvas = renderer.domElement;
+            
+            // Mouse events (para desktop)
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+                canvas.style.cursor = 'grabbing';
+            });
+            
+            canvas.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const deltaX = e.clientX - previousMousePosition.x;
+                    const deltaY = e.clientY - previousMousePosition.y;
+                    
+                    cameraRotation.y += deltaX * 0.004;
+                    cameraRotation.x += deltaY * 0.004;
+                    
+                    cameraRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.x));
+                    
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                }
+            });
+            
+            canvas.addEventListener('mouseup', () => {
+                isDragging = false;
+                canvas.style.cursor = 'grab';
+            });
+            
+            canvas.addEventListener('mouseleave', () => {
+                isDragging = false;
+                canvas.style.cursor = 'grab';
+            });
+            
+            canvas.style.cursor = 'grab';
+            
+            // Wheel (desktop)
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomSpeed = isMobile ? 100 : 150;
+                
+                if (e.deltaY < 0) {
+                    cameraDistance = Math.max(800, cameraDistance - zoomSpeed);
+                } else {
+                    cameraDistance = Math.min(8000, cameraDistance + zoomSpeed);
+                }
+            });
+            
+            // Touch events MEJORADOS para móvil
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let touchStartDistance = 0;
+            let isPinching = false;
+            let lastTouchTime = 0;
+            
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                
+                const currentTime = new Date().getTime();
+                
+                // Doble toque para reset en móvil
+                if (currentTime - lastTouchTime < 300) {
+                    cameraRotation = { x: 0, y: 0 };
+                    cameraDistance = isMobile ? 3000 : 2500;
+                    return;
+                }
+                
+                lastTouchTime = currentTime;
+                
+                if (e.touches.length === 1) {
+                    touchStartX = e.touches[0].clientX;
+                    touchStartY = e.touches[0].clientY;
+                } else if (e.touches.length === 2) {
+                    isPinching = true;
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    touchStartDistance = Math.sqrt(dx * dx + dy * dy);
+                }
+            }, { passive: false });
+            
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                
+                if (e.touches.length === 1 && !isPinching) {
+                    const touch = e.touches[0];
+                    const deltaX = touch.clientX - touchStartX;
+                    const deltaY = touch.clientY - touchStartY;
+                    
+                    // Sensibilidad diferente para móvil
+                    const sensitivity = isMobile ? 0.012 : 0.008;
+                    cameraRotation.y += deltaX * sensitivity;
+                    cameraRotation.x += deltaY * sensitivity;
+                    
+                    cameraRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.x));
+                    
+                    touchStartX = touch.clientX;
+                    touchStartY = touch.clientY;
+                }
+                
+                if (e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const currentDistance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    const zoomFactor = currentDistance / touchStartDistance;
+                    cameraDistance = Math.max(800, Math.min(8000, cameraDistance / zoomFactor));
+                    
+                    touchStartDistance = currentDistance;
+                }
+            }, { passive: false });
+            
+            canvas.addEventListener('touchend', () => {
+                isPinching = false;
+            });
+            
+            // Resize para ambos dispositivos
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+            });
+            
+            // Manejar orientación en móvil
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                }, 100);
+            });
+        }
+        
+        // Animación
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const time = Date.now() * 0.001;
+            
+            // Actualizar colores dinámicamente
+            updateColors(time);
+            
+            // Pulsación del corazón
+            if (galaxyObjects.heart) {
+                const pulse = 1 + Math.sin(time * 2) * 0.1;
+                galaxyObjects.heart.group.scale.set(pulse, pulse, pulse);
+                
+                // Rotación suave
+                galaxyObjects.heart.group.rotation.y += 0.001;
+                galaxyObjects.heart.aura.rotation.y += 0.002;
+                galaxyObjects.heart.sparks.rotation.y += 0.003;
+                
+                // Efecto de brillo pulsante (más intenso en fondo negro)
+                const brightness = 0.8 + Math.sin(time * 3) * 0.2;
+                galaxyObjects.heart.material.opacity = brightness;
+                galaxyObjects.heart.sparkMaterial.opacity = brightness * 0.8;
+            }
+            
+            // Rotación de brazos espirales
+            if (galaxyObjects.spiralGroup) {
+                galaxyObjects.spiralGroup.rotation.y += 0.0002;
+            }
+            
+            // Rotación de halo
+            if (galaxyObjects.halo) {
+                galaxyObjects.halo.stars.rotation.y += 0.0001;
+            }
+            
+            // Rotación de fondo
+            if (galaxyObjects.background) {
+                galaxyObjects.background.stars.rotation.y += 0.00005;
+            }
+            
+            // Actualizar cámara
+            camera.position.x = cameraDistance * Math.sin(cameraRotation.y) * Math.cos(cameraRotation.x);
+            camera.position.y = cameraDistance * Math.sin(cameraRotation.x);
+            camera.position.z = cameraDistance * Math.cos(cameraRotation.y) * Math.cos(cameraRotation.x);
+            camera.lookAt(0, 0, 0);
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Iniciar
+        window.onload = init;
+    </script>
+</body>
+</html>
